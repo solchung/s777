@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VN SENSE - Stock Screener & Scoring System</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-logo">
+                <i class="fa-solid fa-chart-line logo-icon"></i>
+                <div class="logo-text">
+                    <h1>VN SENSE</h1>
+                    <span>STOCK SCREENING & SCORING SYSTEM</span>
+                </div>
+            </div>
+            <div class="header-status">
+                <div class="market-status" id="marketStatus">
+                    <span class="status-dot green"></span>
+                    <span class="status-label">Thị trường đóng cửa</span>
+                </div>
+                <div class="time-stamp" id="lastUpdateTime">Cập nhật: Chưa có dữ liệu</div>
+            </div>
+        </header>
+
+        <!-- Dashboard Stats -->
+        <section class="dashboard-stats">
+            <div class="stat-card leader-card">
+                <div class="stat-icon"><i class="fa-solid fa-crown"></i></div>
+                <div class="stat-info">
+                    <span class="stat-value" id="countLeaders">0</span>
+                    <span class="stat-label">Leader mạnh (9-10đ)</span>
+                </div>
+                <div class="glow-bg"></div>
+            </div>
+            
+            <div class="stat-card watchlist-card">
+                <div class="stat-icon"><i class="fa-solid fa-star"></i></div>
+                <div class="stat-info">
+                    <span class="stat-value" id="countWatchlist">0</span>
+                    <span class="stat-label">Watchlist ưu tiên (7-8đ)</span>
+                </div>
+                <div class="glow-bg"></div>
+            </div>
+            
+            <div class="stat-card neutral-card">
+                <div class="stat-icon"><i class="fa-solid fa-gauge-simple-high"></i></div>
+                <div class="stat-info">
+                    <span class="stat-value" id="countNeutral">0</span>
+                    <span class="stat-label">Trung tính (5-6đ)</span>
+                </div>
+                <div class="glow-bg"></div>
+            </div>
+
+            <div class="stat-card total-card">
+                <div class="stat-icon"><i class="fa-solid fa-database"></i></div>
+                <div class="stat-info">
+                    <span class="stat-value" id="countTotal">0</span>
+                    <span class="stat-label">Tổng cổ phiếu quét</span>
+                </div>
+                <div class="glow-bg"></div>
+            </div>
+        </section>
+
+        <!-- Scanning Status Overlay Panel -->
+        <div class="scan-progress-panel" id="scanProgressPanel">
+            <div class="progress-details">
+                <span class="progress-message" id="progressMsg">Sẵn sàng quét dữ liệu...</span>
+                <span class="progress-percentage" id="progressPct">0%</span>
+            </div>
+            <div class="progress-bar-container">
+                <div class="progress-bar-fill" id="progressBarFill" style="width: 0%"></div>
+            </div>
+        </div>
+
+        <!-- Controls Toolbar -->
+        <section class="controls-toolbar">
+            <div class="action-buttons">
+                <button class="btn btn-primary" id="btnStartScan">
+                    <i class="fa-solid fa-circle-play"></i>
+                    BẮT ĐẦU QUÉT & CHẤM ĐIỂM
+                </button>
+                <div class="export-group" id="exportGroup">
+                    <button class="btn btn-secondary btn-icon" id="btnExportCsv" title="Xuất CSV">
+                        <i class="fa-solid fa-file-csv"></i> CSV
+                    </button>
+                    <button class="btn btn-secondary btn-icon" id="btnExportExcel" title="Xuất Excel">
+                        <i class="fa-solid fa-file-excel"></i> EXCEL
+                    </button>
+                </div>
+            </div>
+
+            <div class="filters-group">
+                <div class="search-box">
+                    <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                    <input type="text" id="searchInput" placeholder="Tìm mã chứng khoán (VD: FPT)...">
+                </div>
+                <div class="dropdown-filter">
+                    <select id="filterIndustry">
+                        <option value="Tất cả các ngành">Tất cả các ngành</option>
+                    </select>
+                </div>
+                <div class="dropdown-filter">
+                    <select id="filterScore">
+                        <option value="Tất cả điểm số">Tất cả điểm số</option>
+                        <option value="9-10 điểm (Leader mạnh)">9-10 điểm (Leader mạnh)</option>
+                        <option value="7-8 điểm (Watchlist ưu tiên)">7-8 điểm (Watchlist ưu tiên)</option>
+                        <option value="5-6 điểm (Trung tính)">5-6 điểm (Trung tính)</option>
+                        <option value="Dưới 5 điểm (Loại bỏ)">Dưới 5 điểm (Loại bỏ)</option>
+                    </select>
+                </div>
+            </div>
+        </section>
+
+        <!-- Navigation Tabs -->
+        <nav class="nav-tabs">
+            <button class="tab-link active" data-tab="tab-screener">
+                <i class="fa-solid fa-filter"></i> BỘ LỌC CỔ PHIẾU
+            </button>
+            <button class="tab-link" data-tab="tab-alerts">
+                <i class="fa-solid fa-bell"></i> CẢNH BÁO MỚI <span class="alert-badge" id="alertBadge" style="display: none;">0</span>
+            </button>
+            <button class="tab-link" data-tab="tab-criteria">
+                <i class="fa-solid fa-book-open"></i> TIÊU CHÍ CHẤM ĐIỂM
+            </button>
+        </nav>
+
+        <!-- Main Workspace -->
+        <main class="workspace-content">
+            <!-- TAB 1: SCREENER -->
+            <div id="tab-screener" class="tab-panel active">
+                <div class="table-info">
+                    <span id="resultsSummaryText">Đang tải dữ liệu...</span>
+                </div>
+                <div class="table-responsive">
+                    <table class="screener-table" id="screenerTable">
+                        <thead>
+                            <tr>
+                                <th class="sortable" data-col="ticker">Mã CP <i class="fa-solid fa-sort"></i></th>
+                                <th class="sortable" data-col="score">Điểm số <i class="fa-solid fa-sort-down"></i></th>
+                                <th class="sortable" data-col="classification">Phân Loại <i class="fa-solid fa-sort"></i></th>
+                                <th class="sortable" data-col="close">Giá Hiện Tại <i class="fa-solid fa-sort"></i></th>
+                                <th class="sortable" data-col="dist_high">% Cách Đỉnh 52w <i class="fa-solid fa-sort"></i></th>
+                                <th>MA20</th>
+                                <th>MA50</th>
+                                <th>MA200</th>
+                                <th class="sortable" data-col="rs_vs_index_3m">RS 3T vs Index <i class="fa-solid fa-sort"></i></th>
+                                <th class="sortable" data-col="volume">Vol TB 20 Phiên <i class="fa-solid fa-sort"></i></th>
+                                <th class="sortable" data-col="distribution_days">Số Ngày PP <i class="fa-solid fa-sort"></i></th>
+                            </tr>
+                        </thead>
+                        <tbody id="screenerTableBody">
+                            <!-- Rows injected by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+                <div class="empty-state" id="emptyState">
+                    <i class="fa-solid fa-folder-open empty-icon"></i>
+                    <p id="emptyStateText">Chưa có dữ liệu lọc. Vui lòng bấm 'BẮT ĐẦU QUÉT & CHẤM ĐIỂM' ở trên.</p>
+                </div>
+            </div>
+
+            <!-- TAB 2: ALERTS -->
+            <div id="tab-alerts" class="tab-panel">
+                <div class="panel-header">
+                    <h2>Lịch sử Cảnh báo Giao dịch</h2>
+                    <button class="btn btn-danger btn-sm" id="btnClearAlerts">
+                        <i class="fa-solid fa-trash-can"></i> Xóa Lịch Sử
+                    </button>
+                </div>
+                <div class="alerts-list-container" id="alertsListContainer">
+                    <!-- Alerts items injected by JavaScript -->
+                </div>
+                <div class="empty-state" id="alertsEmptyState">
+                    <i class="fa-solid fa-bell-slash empty-icon"></i>
+                    <p>Chưa có cảnh báo nào xuất hiện.</p>
+                </div>
+            </div>
+
+            <!-- TAB 3: CRITERIA -->
+            <div id="tab-criteria" class="tab-panel">
+                <div class="criteria-container">
+                    <div class="criteria-grid">
+                        <div class="criteria-card">
+                            <div class="criteria-num">01</div>
+                            <h3>Giá > MA20</h3>
+                            <p>Giá đóng cửa hiện tại nằm trên đường trung bình động 20 ngày. Xác nhận xu hướng ngắn hạn đang hướng lên.</p>
+                        </div>
+                        <div class="criteria-card">
+                            <div class="criteria-num">02</div>
+                            <h3>MA20 > MA50</h3>
+                            <p>Đường xu hướng ngắn hạn (20 ngày) nằm trên đường xu hướng trung hạn (50 ngày), báo hiệu gia tốc tăng giá tốt.</p>
+                        </div>
+                        <div class="criteria-card">
+                            <div class="criteria-num">03</div>
+                            <h3>MA50 > MA200</h3>
+                            <p>Đường xu hướng trung hạn nằm trên đường xu hướng dài hạn (200 ngày). Đây là một phần quan trọng của Golden Cross.</p>
+                        </div>
+                        <div class="criteria-card">
+                            <div class="criteria-num">04</div>
+                            <h3>Độ dốc MA200 > 0</h3>
+                            <p>Đường trung bình động 200 ngày phải có hướng đi lên (dốc dương) liên tục trong ít nhất 20 phiên gần nhất.</p>
+                        </div>
+                        <div class="criteria-card">
+                            <div class="criteria-num">05</div>
+                            <h3>Cách Đỉnh 52 tuần &le; 15%</h3>
+                            <p>Giá hiện tại không được chiết khấu quá 15% so với đỉnh cao nhất trong 52 tuần, thể hiện sức mạnh giữ giá tốt.</p>
+                        </div>
+                        <div class="criteria-card">
+                            <div class="criteria-num">06</div>
+                            <h3>RS 3 tháng > VNINDEX</h3>
+                            <p>Sức mạnh tương quan (Relative Strength) tăng trưởng mạnh hơn chỉ số VNINDEX trong vòng 3 tháng gần nhất.</p>
+                        </div>
+                        <div class="criteria-card">
+                            <div class="criteria-num">07</div>
+                            <h3>Vol TB 20 > Vol TB 60</h3>
+                            <p>Khối lượng giao dịch trung bình 20 phiên lớn hơn 60 phiên, chứng tỏ dòng tiền lớn đang đổ bộ vào cổ phiếu.</p>
+                        </div>
+                        <div class="criteria-card">
+                            <div class="criteria-num">08</div>
+                            <h3>Nền giá tích lũy chặt chẽ</h3>
+                            <p>Có quá trình tích lũy từ 6–12 tuần với biên độ dao động giá thu hẹp lại nhỏ hơn 15% (Mô hình VCP/Nền giá phẳng).</p>
+                        </div>
+                        <div class="criteria-card">
+                            <div class="criteria-num">09</div>
+                            <h3>Số phiên phân phối &le; 4</h3>
+                            <p>Không xuất hiện quá 4 ngày phân phối (giảm mạnh kèm vol lớn) trong 25 phiên gần nhất nhằm giảm thiểu rủi ro bán tháo.</p>
+                        </div>
+                        <div class="criteria-card">
+                            <div class="criteria-num">10</div>
+                            <h3>Tăng trưởng cơ bản (+)</h3>
+                            <p>Doanh nghiệp duy trì tăng trưởng dương về EPS hoặc Lợi nhuận sau thuế trong cả 4 quý gần nhất so với cùng kỳ.</p>
+                        </div>
+                    </div>
+
+                    <div class="classification-guide">
+                        <h2>Quy tắc Phân Loại Hệ Thống</h2>
+                        <div class="class-guide-grid">
+                            <div class="class-guide-item leader">
+                                <i class="fa-solid fa-crown"></i>
+                                <h4>Leader mạnh (9–10 điểm)</h4>
+                                <p>Cổ phiếu dẫn đầu thị trường có cấu trúc giá hoàn hảo và nền tảng tăng trưởng cơ bản vượt trội.</p>
+                            </div>
+                            <div class="class-guide-item priority">
+                                <i class="fa-solid fa-star"></i>
+                                <h4>Watchlist ưu tiên (7–8 điểm)</h4>
+                                <p>Cổ phiếu mạnh có triển vọng bứt phá, cần theo dõi sát sao điểm mua khi xuất hiện breakout.</p>
+                            </div>
+                            <div class="class-guide-item neutral">
+                                <i class="fa-solid fa-circle-dot"></i>
+                                <h4>Trung tính (5–6 điểm)</h4>
+                                <p>Cổ phiếu tích lũy ổn định nhưng chưa có dòng tiền quyết liệt hoặc thiếu đột phá cơ bản.</p>
+                            </div>
+                            <div class="class-guide-item eliminate">
+                                <i class="fa-solid fa-ban"></i>
+                                <h4>Loại bỏ (Dưới 5 điểm)</h4>
+                                <p>Cổ phiếu có xu hướng yếu, nằm trong kênh giảm giá hoặc gặp áp lực phân phối lớn.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Stock Analysis Modal -->
+    <div class="modal" id="stockModal">
+        <div class="modal-overlay" id="modalOverlay"></div>
+        <div class="modal-content">
+            <button class="modal-close" id="modalClose"><i class="fa-solid fa-xmark"></i></button>
+            <div class="modal-header-section">
+                <div class="modal-title-area">
+                    <h2 id="modalTicker">FPT</h2>
+                    <div class="modal-sub-info">
+                        <span id="modalCompanyName">Công ty Cổ phần FPT</span>
+                        <span id="modalExchange" class="badge-exchange">HOSE</span>
+                    </div>
+                </div>
+                <div class="modal-score-badge" id="modalScoreBadge">
+                    <span class="score-num" id="modalScoreNum">8</span>
+                    <span class="score-total">/10đ</span>
+                </div>
+            </div>
+            
+            <div class="modal-sector-row">
+                <span id="modalSector">Ngành: Công nghệ thông tin</span>
+                <span id="modalClassification" class="badge-class">Watchlist ưu tiên</span>
+            </div>
+
+            <div class="modal-grid">
+                <!-- Checklist column -->
+                <div class="modal-panel checklist-panel">
+                    <h3>Chi Tiết Tiêu Chí Kỹ Thuật (0-9đ)</h3>
+                    <div class="checklist-list" id="modalChecklist">
+                        <!-- Items injected by JS -->
+                    </div>
+                </div>
+
+                <!-- Fundamental & Performance Panel -->
+                <div class="modal-panel info-panel">
+                    <h3>Thông Tin Tài Chính & Cơ Bản</h3>
+                    <div class="fundamental-status">
+                        <div class="fund-status-header">
+                            <span class="fund-title">Tăng trưởng 4 quý gần nhất (EPS / LNST)</span>
+                            <span id="fundBadge" class="badge-status">Đạt yêu cầu</span>
+                        </div>
+                        <p class="fund-desc">Quy tắc số [10]: Doanh nghiệp phải có tăng trưởng EPS hoặc lợi nhuận sau thuế so với cùng kỳ (YoY) dương trong cả 4 quý gần nhất để đạt điểm cơ bản.</p>
+                    </div>
+
+                    <h3 style="margin-top: 20px;">Dữ Liệu Giá & Khối Lượng</h3>
+                    <div class="info-values-grid">
+                        <div class="info-val-card">
+                            <span class="val-label">Giá đóng cửa</span>
+                            <span class="val-num" id="valClose">0đ</span>
+                        </div>
+                        <div class="info-val-card">
+                            <span class="val-label">Cách đỉnh 52w</span>
+                            <span class="val-num" id="valDistHigh">0%</span>
+                        </div>
+                        <div class="info-val-card">
+                            <span class="val-label">Khối lượng 20 phiên</span>
+                            <span class="val-num" id="valVol20">0</span>
+                        </div>
+                        <div class="info-val-card">
+                            <span class="val-label">Số ngày phân phối</span>
+                            <span class="val-num" id="valDistDays">0 ngày</span>
+                        </div>
+                    </div>
+
+                    <div class="moving-averages-panel">
+                        <h4>Đường Trung Bình Động</h4>
+                        <div class="ma-values">
+                            <div class="ma-val"><span>MA20:</span> <strong id="valMA20">0đ</strong></div>
+                            <div class="ma-val"><span>MA50:</span> <strong id="valMA50">0đ</strong></div>
+                            <div class="ma-val"><span>MA200:</span> <strong id="valMA200">0đ</strong></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
