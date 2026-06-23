@@ -6,10 +6,16 @@ import time
 import concurrent.futures
 import os
 import json
+import sys
 
 # --- TradingView Scanner API Config ---
 TV_SCANNER_URL = "https://scanner.tradingview.com/vietnam/scan"
-CACHE_FILE = "fundamental_cache.json"
+
+# Xác định đường dẫn cache file an toàn cho điện thoại (Android)
+if hasattr(sys, "getandroidapilevel") or 'ANDROID_ARGUMENT' in os.environ:
+    CACHE_FILE = os.path.join(os.path.expanduser("~"), "fundamental_cache.json")
+else:
+    CACHE_FILE = "fundamental_cache.json"
 
 def get_tradingview_stocks():
     """
@@ -43,8 +49,13 @@ def get_tradingview_stocks():
         "range": [0, 1800]  # Tăng lên 1800 để lấy toàn bộ HOSE, HNX và UPCOM
     }
     
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://www.tradingview.com/"
+    }
+    
     try:
-        response = requests.post(TV_SCANNER_URL, json=payload, timeout=15)
+        response = requests.post(TV_SCANNER_URL, json=payload, headers=headers, timeout=15)
         response.raise_for_status()
         data = response.json()
         
