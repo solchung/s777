@@ -1,15 +1,24 @@
-import flet as ft
-import pandas as pd
-import threading
-import os
 import sys
+import os
+
+# Redirect stdout and stderr to a log file on Android to capture any startup crashes
+is_android = hasattr(sys, "getandroidapilevel") or 'ANDROID_ARGUMENT' in os.environ
+if is_android:
+    try:
+        log_path = os.path.join(os.path.expanduser("~"), "flet_debug.log")
+        # Open in write-mode (overwrite previous log) and buffer immediately
+        log_file = open(log_path, "w", encoding="utf-8", buffering=1)
+        sys.stdout = log_file
+        sys.stderr = log_file
+        print("=== Flet Python App starting up on Android ===")
+    except Exception:
+        pass
+
+import flet as ft
+import threading
 import csv
 import json
 from datetime import datetime
-import openpyxl
-from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-
-from screener_logic import run_sepa_screener
 
 # --- App Styling Constants ---
 BG_COLOR = "#0B0E14"         # Deep blue-black
@@ -363,6 +372,7 @@ def _main(page: ft.Page):
 
             else:
                 # 1. Chạy bộ lọc cục bộ
+                from screener_logic import run_sepa_screener
                 results = run_sepa_screener(progress_callback=update_progress)
                 
                 # 2. Xử lý logic cảnh báo bằng cách so sánh kết quả cũ
@@ -658,6 +668,9 @@ def _main(page: ft.Page):
             return
             
         try:
+            import openpyxl
+            from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+            
             filename = f"screener_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
             # Thay đổi đường dẫn xuất file để an toàn trên Android
             import sys
@@ -802,6 +815,37 @@ def _main(page: ft.Page):
         server_url_input.disabled = mode_radio.value == "local"
         page.update()
 
+    def view_debug_logs(e):
+        try:
+            log_path = os.path.join(os.path.expanduser("~"), "flet_debug.log")
+            if os.path.exists(log_path):
+                with open(log_path, "r", encoding="utf-8") as f:
+                    logs = f.read()
+            else:
+                logs = "Không tìm thấy file log (flet_debug.log)."
+        except Exception as ex:
+            logs = f"Không thể đọc log: {ex}"
+            
+        log_text = ft.Text(logs, font_family="monospace", size=11, selectable=True)
+        
+        def close_dialog(dlg):
+            dlg.open = False
+            page.update()
+            
+        dialog = ft.AlertDialog(
+            title=ft.Text("Log lỗi hệ thống"),
+            content=ft.Container(
+                content=ft.Column([log_text], scroll=ft.ScrollMode.ALWAYS),
+                width=500,
+                height=400
+            ),
+            actions=[ft.TextButton("Đóng", on_click=lambda _: close_dialog(dialog))]
+        )
+        
+        page.dialog = dialog
+        dialog.open = True
+        page.update()
+
     def reload_cached_data():
         nonlocal screener_results, filtered_results, alerts_log
         if is_server_mode:
@@ -909,14 +953,24 @@ def _main(page: ft.Page):
                     server_url_input,
                     ft.Text("Mẹo: Đảm bảo máy tính đang chạy 'python run.py' và điện thoại kết nối chung Wi-Fi.", size=12, color=TEXT_SECONDARY),
                     ft.Container(height=10),
-                    ft.Button(
-                        content=ft.Text("LƯU CẤU HÌNH", weight=ft.FontWeight.BOLD),
-                        bgcolor=ACCENT_GREEN,
-                        color=BG_COLOR,
-                        height=45,
-                        icon=ft.Icons.SAVE,
-                        on_click=save_settings
-                    )
+                    ft.Row([
+                        ft.Button(
+                            content=ft.Text("LƯU CẤU HÌNH", weight=ft.FontWeight.BOLD),
+                            bgcolor=ACCENT_GREEN,
+                            color=BG_COLOR,
+                            height=45,
+                            icon=ft.Icons.SAVE,
+                            on_click=save_settings
+                        ),
+                        ft.Button(
+                            content=ft.Text("XEM LOG LỖI", weight=ft.FontWeight.BOLD),
+                            bgcolor=TEXT_SECONDARY,
+                            color=TEXT_PRIMARY,
+                            height=45,
+                            icon=ft.Icons.BUG_REPORT,
+                            on_click=view_debug_logs
+                        )
+                    ], spacing=10)
                 ]),
                 bgcolor=CARD_BG,
                 padding=20,
