@@ -30,10 +30,12 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install flet pandas numpy requests openpyxl
+          pip install flet requests
 
       - name: Build APK
         run: |
+          echo "flet>=0.21.0" > requirements.txt
+          echo "requests>=2.31.0" >> requirements.txt
           flet build apk --verbose --yes
 
       - name: Upload APK Artifact
@@ -41,3 +43,4 @@ jobs:
         with:
           name: VNScreener-APK
           path: build/apk/**/*.apk
+
