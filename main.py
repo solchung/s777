@@ -2,6 +2,7 @@ import flet as ft
 import pandas as pd
 import threading
 import os
+import sys
 import csv
 import json
 from datetime import datetime
@@ -20,11 +21,53 @@ TEXT_SECONDARY = "#8A99AD"   # Light grey-blue
 ERROR_COLOR = "#FF1744"      # Bright Red
 WARNING_COLOR = "#FFD600"    # Amber Yellow
 
-CACHE_RESULTS_FILE = "screener_results_cache.json"
-PREV_RESULTS_FILE = "previous_screener_results.json"
-ALERTS_LOG_FILE = "alerts_log.json"
+# Xác định đường dẫn ghi file an toàn cho điện thoại (Android)
+def get_writable_path(filename):
+    if hasattr(sys, "getandroidapilevel") or 'ANDROID_ARGUMENT' in os.environ:
+        return os.path.join(os.path.expanduser("~"), filename)
+    return filename
+
+CACHE_RESULTS_FILE = get_writable_path("screener_results_cache.json")
+PREV_RESULTS_FILE = get_writable_path("previous_screener_results.json")
+ALERTS_LOG_FILE = get_writable_path("alerts_log.json")
 
 def main(page: ft.Page):
+    try:
+        _main(page)
+    except Exception as e:
+        import traceback
+        err_msg = traceback.format_exc()
+        page.clean()
+        page.bgcolor = "#0B0E14"
+        page.scroll = ft.ScrollMode.ALWAYS
+        page.add(
+            ft.Container(
+                content=ft.Column([
+                    ft.Icon(ft.Icons.ERROR_OUTLINE, color="#FF1744", size=60),
+                    ft.Text("ĐÃ XẢY RA LỖI HỆ THỐNG", size=20, weight=ft.FontWeight.BOLD, color="#FF1744"),
+                    ft.Divider(color="#263238"),
+                    ft.Text("Vui lòng chụp ảnh màn hình này để báo cáo sự cố:", size=14, color="#FFFFFF"),
+                    ft.Container(
+                        content=ft.Text(err_msg, color="#FFA726", size=12),
+                        bgcolor="#1E293B",
+                        padding=15,
+                        border_radius=8,
+                        border=ft.Border.all(1, "#334155")
+                    ),
+                    ft.Button(
+                        content=ft.Text("THỬ KHỞI ĐỘNG LẠI / XÓA BỘ NHỚ TẠM", weight=ft.FontWeight.BOLD),
+                        bgcolor="#00B0FF",
+                        color="#FFFFFF",
+                        on_click=lambda _: page.client_storage.clear() or page.update()
+                    )
+                ], spacing=15, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                padding=20,
+                alignment=ft.alignment.center
+            )
+        )
+        page.update()
+
+def _main(page: ft.Page):
     page.title = "VN Stock Screener & Scoring System"
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor = BG_COLOR
@@ -37,22 +80,27 @@ def main(page: ft.Page):
     filtered_results = []
     alerts_log = []
     
-    # Load cached results on startup
-    if os.path.exists(CACHE_RESULTS_FILE):
-        try:
-            with open(CACHE_RESULTS_FILE, "r", encoding="utf-8") as f:
-                screener_results = json.load(f)
-                filtered_results = list(screener_results)
-        except Exception:
-            pass
-            
-    # Load cached alerts on startup
-    if os.path.exists(ALERTS_LOG_FILE):
-        try:
-            with open(ALERTS_LOG_FILE, "r", encoding="utf-8") as f:
-                alerts_log = json.load(f)
-        except Exception:
-            pass
+    # Đọc cấu hình chế độ chạy từ bộ nhớ tạm
+    is_server_mode = page.client_storage.get("is_server_mode") or False
+    server_url = page.client_storage.get("server_url") or "http://127.0.0.1:8000"
+    
+    # Tải dữ liệu ban đầu
+    if not is_server_mode:
+        # Chế độ Cục bộ: Tải từ cache files
+        if os.path.exists(CACHE_RESULTS_FILE):
+            try:
+                with open(CACHE_RESULTS_FILE, "r", encoding="utf-8") as f:
+                    screener_results = json.load(f)
+                    filtered_results = list(screener_results)
+            except Exception:
+                pass
+                
+        if os.path.exists(ALERTS_LOG_FILE):
+            try:
+                with open(ALERTS_LOG_FILE, "r", encoding="utf-8") as f:
+                    alerts_log = json.load(f)
+            except Exception:
+                pass
 
     # Unique Industries list for filter
     industries = ["Tất cả các ngành"]
@@ -252,82 +300,150 @@ def main(page: ft.Page):
         t.start()
 
     def run_screener_job():
-        nonlocal screener_results
+        nonlocal screener_results, alerts_log
         try:
-            # 1. Chạy bộ lọc
-            results = run_sepa_screener(progress_callback=update_progress)
-            
-            # 2. Xử lý logic cảnh báo bằng cách so sánh kết quả cũ
-            prev_results = {}
-            if os.path.exists(PREV_RESULTS_FILE):
+            if is_server_mode:
+                import requests
+                # 1. Gọi server khởi chạy bộ quét
                 try:
-                    with open(PREV_RESULTS_FILE, "r", encoding="utf-8") as f:
-                        prev_list = json.load(f)
-                        prev_results = {x['ticker']: x for x in prev_list}
+                    res = requests.post(f"{server_url}/api/screener/start", timeout=8)
+                    res_data = res.json()
+                    if res_data.get("status") == "error":
+                        # Server có thể đang chạy quét sẵn, vẫn tiếp tục theo dõi tiến trình
+                        pass
+                except Exception as e:
+                    raise Exception(f"Không thể kết nối đến Máy chủ tại {server_url}: {e}")
+
+                # 2. Vòng lặp theo dõi tiến trình từ server
+                while True:
+                    time.sleep(1.5)
+                    try:
+                        status_res = requests.get(f"{server_url}/api/screener/status", timeout=5).json()
+                        is_running = status_res.get("is_running", False)
+                        pct = status_res.get("progress_pct", 0.0)
+                        msg = status_res.get("progress_msg", "Đang quét trên server...")
+                        
+                        update_progress(msg, pct)
+                        
+                        if not is_running:
+                            break
+                    except Exception as e:
+                        # Tạm thời mất kết nối hoặc lỗi nhỏ, bỏ qua để thử lại
+                        time.sleep(1)
+                        continue
+
+                # 3. Tải kết quả quét từ server
+                try:
+                    results_res = requests.get(f"{server_url}/api/screener/results", timeout=10)
+                    if results_res.status_code == 200:
+                        screener_results = results_res.json()
+                    else:
+                        raise Exception(f"Server trả về mã lỗi {results_res.status_code}")
+                except Exception as e:
+                    raise Exception(f"Không thể tải kết quả quét từ Server: {e}")
+
+                # 4. Tải danh sách cảnh báo từ server
+                try:
+                    alerts_res = requests.get(f"{server_url}/api/screener/alerts", timeout=10)
+                    if alerts_res.status_code == 200:
+                        alerts_log = alerts_res.json()
+                except Exception:
+                    pass  # Cảnh báo không thành công cũng không sao
+
+                # Cập nhật bộ lọc Ngành
+                unique_inds = sorted(list(set(x.get('industry', 'Chưa phân loại') for x in screener_results)))
+                industry_dropdown.options = [ft.dropdown.Option("Tất cả các ngành")] + [ft.dropdown.Option(ind) for ind in unique_inds]
+                
+                # Render kết quả lên UI
+                apply_filters()
+                render_alerts_table()
+                
+                progress_container.visible = False
+                page.update()
+
+            else:
+                # 1. Chạy bộ lọc cục bộ
+                results = run_sepa_screener(progress_callback=update_progress)
+                
+                # 2. Xử lý logic cảnh báo bằng cách so sánh kết quả cũ
+                prev_results = {}
+                if os.path.exists(PREV_RESULTS_FILE):
+                    try:
+                        with open(PREV_RESULTS_FILE, "r", encoding="utf-8") as f:
+                            prev_list = json.load(f)
+                            prev_results = {x['ticker']: x for x in prev_list}
+                    except Exception:
+                        pass
+                
+                new_alerts = []
+                timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                for r in results:
+                    ticker = r['ticker']
+                    score = r['score']
+                    
+                    # Cảnh báo 1: Lần đầu đạt >= 7 điểm
+                    prev_score = prev_results.get(ticker, {}).get('score', 0)
+                    if score >= 7 and prev_score < 7:
+                        new_alerts.append({
+                            "time": timestamp_str,
+                            "ticker": ticker,
+                            "score": score,
+                            "type": "Tăng Điểm (>7)",
+                            "details": f"Điểm số tăng vượt bậc lên {score} điểm (phiên trước: {prev_score} điểm). Xếp hạng: {r['classification']}."
+                        })
+                    
+                    # Cảnh báo 2: Breakout với volume lớn
+                    if r['is_breakout']:
+                        new_alerts.append({
+                            "time": timestamp_str,
+                            "ticker": ticker,
+                            "score": score,
+                            "type": "Breakout Vol lớn",
+                            "details": f"Giá bứt phá vượt đỉnh ngắn hạn với khối lượng nổ gấp {r['breakout_vol_ratio']} lần trung bình 20 phiên."
+                        })
+                
+                # Cập nhật lịch sử cảnh báo
+                if new_alerts:
+                    alerts_log = new_alerts + alerts_log # Thêm vào đầu danh sách
+                    # Giới hạn 200 cảnh báo gần nhất
+                    alerts_log = alerts_log[:200]
+                    
+                    try:
+                        with open(ALERTS_LOG_FILE, "w", encoding="utf-8") as f:
+                            json.dump(alerts_log, f, ensure_ascii=False, indent=2)
+                    except Exception:
+                        pass
+                    
+                    show_snackbar(f"Phát hiện {len(new_alerts)} cảnh báo giao dịch mới!", WARNING_COLOR)
+                
+                # Lưu kết quả hiện tại làm kết quả tham chiếu cho phiên sau
+                try:
+                    with open(PREV_RESULTS_FILE, "w", encoding="utf-8") as f:
+                        json.dump(results, f, ensure_ascii=False, indent=2)
                 except Exception:
                     pass
-            
-            new_alerts = []
-            timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
-            for r in results:
-                ticker = r['ticker']
-                score = r['score']
+                    
+                # Lưu kết quả cache hiện tại
+                try:
+                    with open(CACHE_RESULTS_FILE, "w", encoding="utf-8") as f:
+                        json.dump(results, f, ensure_ascii=False, indent=2)
+                except Exception:
+                    pass
+                    
+                # Cập nhật state chính
+                screener_results = results
                 
-                # Cảnh báo 1: Lần đầu đạt >= 7 điểm
-                prev_score = prev_results.get(ticker, {}).get('score', 0)
-                if score >= 7 and prev_score < 7:
-                    new_alerts.append({
-                        "time": timestamp_str,
-                        "ticker": ticker,
-                        "score": score,
-                        "type": "Tăng Điểm (>7)",
-                        "details": f"Điểm số tăng vượt bậc lên {score} điểm (phiên trước: {prev_score} điểm). Xếp hạng: {r['classification']}."
-                    })
+                # Cập nhật bộ lọc Ngành
+                unique_inds = sorted(list(set(x.get('industry', 'Chưa phân loại') for x in results)))
+                industry_dropdown.options = [ft.dropdown.Option("Tất cả các ngành")] + [ft.dropdown.Option(ind) for ind in unique_inds]
                 
-                # Cảnh báo 2: Breakout với volume lớn
-                if r['is_breakout']:
-                    new_alerts.append({
-                        "time": timestamp_str,
-                        "ticker": ticker,
-                        "score": score,
-                        "type": "Breakout Vol lớn",
-                        "details": f"Giá bứt phá vượt đỉnh ngắn hạn với khối lượng nổ gấp {r['breakout_vol_ratio']} lần trung bình 20 phiên."
-                    })
-            
-            # Cập nhật lịch sử cảnh báo
-            if new_alerts:
-                nonlocal alerts_log
-                alerts_log = new_alerts + alerts_log # Thêm vào đầu danh sách
-                # Giới hạn 200 cảnh báo gần nhất
-                alerts_log = alerts_log[:200]
+                # Render kết quả và cảnh báo lên UI
+                apply_filters()
+                render_alerts_table()
                 
-                with open(ALERTS_LOG_FILE, "w", encoding="utf-8") as f:
-                    json.dump(alerts_log, f, ensure_ascii=False, indent=2)
-                
-                show_snackbar(f"Phát hiện {len(new_alerts)} cảnh báo giao dịch mới!", WARNING_COLOR)
-            
-            # Lưu kết quả hiện tại làm kết quả tham chiếu cho phiên sau
-            with open(PREV_RESULTS_FILE, "w", encoding="utf-8") as f:
-                json.dump(results, f, ensure_ascii=False, indent=2)
-                
-            # Lưu kết quả cache hiện tại
-            with open(CACHE_RESULTS_FILE, "w", encoding="utf-8") as f:
-                json.dump(results, f, ensure_ascii=False, indent=2)
-                
-            # Cập nhật state chính
-            screener_results = results
-            
-            # Cập nhật bộ lọc Ngành
-            unique_inds = sorted(list(set(x.get('industry', 'Chưa phân loại') for x in results)))
-            industry_dropdown.options = [ft.dropdown.Option("Tất cả các ngành")] + [ft.dropdown.Option(ind) for ind in unique_inds]
-            
-            # Render kết quả và cảnh báo lên UI
-            apply_filters()
-            render_alerts_table()
-            
-            progress_container.visible = False
-            page.update()
+                progress_container.visible = False
+                page.update()
             
         except Exception as e:
             progress_bar.visible = False
@@ -477,14 +593,27 @@ def main(page: ft.Page):
 
     def clear_alerts_log():
         nonlocal alerts_log
-        alerts_log = []
-        if os.path.exists(ALERTS_LOG_FILE):
+        if is_server_mode:
+            import requests
             try:
-                os.remove(ALERTS_LOG_FILE)
-            except Exception:
-                pass
-        render_alerts_table()
-        show_snackbar("Đã xóa toàn bộ lịch sử cảnh báo.", ACCENT_GREEN)
+                res = requests.post(f"{server_url}/api/screener/alerts/clear", timeout=5)
+                if res.status_code == 200:
+                    alerts_log = []
+                    render_alerts_table()
+                    show_snackbar("Đã xóa toàn bộ lịch sử cảnh báo trên Server.", ACCENT_GREEN)
+                else:
+                    show_snackbar("Không thể xóa lịch sử cảnh báo trên Server.", ERROR_COLOR)
+            except Exception as e:
+                show_snackbar(f"Lỗi kết nối tới Server: {e}", ERROR_COLOR)
+        else:
+            alerts_log = []
+            if os.path.exists(ALERTS_LOG_FILE):
+                try:
+                    os.remove(ALERTS_LOG_FILE)
+                except Exception:
+                    pass
+            render_alerts_table()
+            show_snackbar("Đã xóa toàn bộ lịch sử cảnh báo.", ACCENT_GREEN)
 
     def export_to_csv():
         nonlocal filtered_results
@@ -494,7 +623,12 @@ def main(page: ft.Page):
             
         try:
             filename = f"screener_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            filepath = os.path.join(os.getcwd(), filename)
+            # Thay đổi đường dẫn xuất file để an toàn trên Android
+            import sys
+            if hasattr(sys, "getandroidapilevel") or 'ANDROID_ARGUMENT' in os.environ:
+                filepath = os.path.join(os.path.expanduser("~"), filename)
+            else:
+                filepath = os.path.join(os.getcwd(), filename)
             
             with open(filepath, 'w', newline='', encoding='utf-8-sig') as f:
                 writer = csv.writer(f)
@@ -513,7 +647,7 @@ def main(page: ft.Page):
                         r['industry'], r['exchange']
                     ])
                     
-            show_snackbar(f"Xuất file CSV thành công: {filename}", ACCENT_GREEN)
+            show_snackbar(f"Xuất file CSV thành công: {filepath}", ACCENT_GREEN)
         except Exception as e:
             show_snackbar(f"Không thể xuất file CSV: {e}", ERROR_COLOR)
 
@@ -525,7 +659,12 @@ def main(page: ft.Page):
             
         try:
             filename = f"screener_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-            filepath = os.path.join(os.getcwd(), filename)
+            # Thay đổi đường dẫn xuất file để an toàn trên Android
+            import sys
+            if hasattr(sys, "getandroidapilevel") or 'ANDROID_ARGUMENT' in os.environ:
+                filepath = os.path.join(os.path.expanduser("~"), filename)
+            else:
+                filepath = os.path.join(os.getcwd(), filename)
             
             wb = openpyxl.Workbook()
             ws = wb.active
@@ -614,12 +753,15 @@ def main(page: ft.Page):
                 ws.column_dimensions[col_letter].width = max(max_len + 3, 10)
                 
             wb.save(filepath)
-            show_snackbar(f"Xuất file Excel thành công: {filename}", ACCENT_GREEN)
+            show_snackbar(f"Xuất file Excel thành công: {filepath}", ACCENT_GREEN)
         except Exception as e:
             show_snackbar(f"Không thể xuất file Excel: {e}", ERROR_COLOR)
 
     # --- Daily Market Close Auto Update Checker ---
-    def check_market_close_auto_update():
+    def check_market_close_auto_update_async():
+        if is_server_mode:
+            return  # Server sẽ tự quét, app Flet không cần tự động quét cục bộ
+            
         now = datetime.now()
         is_weekday = now.weekday() < 5
         is_after_market = now.hour >= 16
@@ -637,6 +779,153 @@ def main(page: ft.Page):
         if is_weekday and is_after_market and (last_update_date is None or last_update_date < today):
             show_snackbar("Đã qua 16:00. Tự động quét cập nhật dữ liệu thị trường đóng cửa...", ACCENT_BLUE)
             start_screening_thread()
+
+    # --- Các hàm quản lý Cấu hình ---
+    def save_settings(e):
+        nonlocal is_server_mode, server_url
+        is_server = mode_radio.value == "server"
+        url = server_url_input.value.strip()
+        if is_server and not url:
+            show_snackbar("Vui lòng nhập địa chỉ máy chủ!", ERROR_COLOR)
+            return
+            
+        page.client_storage.set("is_server_mode", is_server)
+        page.client_storage.set("server_url", url)
+        is_server_mode = is_server
+        server_url = url
+        
+        # Tải lại dữ liệu mới từ Server hoặc File Cache
+        reload_cached_data()
+        show_snackbar("Đã lưu cấu hình thành công!", ACCENT_GREEN)
+
+    def on_mode_change(e):
+        server_url_input.disabled = mode_radio.value == "local"
+        page.update()
+
+    def reload_cached_data():
+        nonlocal screener_results, filtered_results, alerts_log
+        if is_server_mode:
+            status_text.value = "Đang tải dữ liệu từ máy chủ..."
+            progress_container.visible = True
+            run_btn.disabled = True
+            page.update()
+            
+            def load_from_server():
+                nonlocal screener_results, filtered_results, alerts_log
+                success = False
+                try:
+                    res = requests.get(f"{server_url}/api/screener/results", timeout=5)
+                    if res.status_code == 200:
+                        screener_results = res.json()
+                        filtered_results = list(screener_results)
+                        success = True
+                except Exception:
+                    pass
+                    
+                try:
+                    res_alerts = requests.get(f"{server_url}/api/screener/alerts", timeout=5)
+                    if res_alerts.status_code == 200:
+                        alerts_log = res_alerts.json()
+                except Exception:
+                    pass
+                
+                # Cập nhật bộ lọc Ngành
+                if screener_results:
+                    unique_inds = sorted(list(set(x.get('industry', 'Chưa phân loại') for x in screener_results)))
+                    industry_dropdown.options = [ft.dropdown.Option("Tất cả các ngành")] + [ft.dropdown.Option(ind) for ind in unique_inds]
+                
+                apply_filters()
+                render_alerts_table()
+                
+                progress_container.visible = False
+                run_btn.disabled = False
+                if not success:
+                    show_snackbar("Không thể kết nối đến Máy chủ. Vui lòng kiểm tra lại cấu hình!", ERROR_COLOR)
+                page.update()
+                
+            threading.Thread(target=load_from_server, daemon=True).start()
+        else:
+            # Tải từ cache files cục bộ
+            screener_results = []
+            if os.path.exists(CACHE_RESULTS_FILE):
+                try:
+                    with open(CACHE_RESULTS_FILE, "r", encoding="utf-8") as f:
+                        screener_results = json.load(f)
+                except Exception:
+                    pass
+            filtered_results = list(screener_results)
+            
+            alerts_log = []
+            if os.path.exists(ALERTS_LOG_FILE):
+                try:
+                    with open(ALERTS_LOG_FILE, "r", encoding="utf-8") as f:
+                        alerts_log = json.load(f)
+                except Exception:
+                    pass
+            
+            if screener_results:
+                unique_inds = sorted(list(set(x.get('industry', 'Chưa phân loại') for x in screener_results)))
+                industry_dropdown.options = [ft.dropdown.Option("Tất cả các ngành")] + [ft.dropdown.Option(ind) for ind in unique_inds]
+            
+            apply_filters()
+            render_alerts_table()
+            page.update()
+
+    def init_data():
+        if is_server_mode:
+            reload_cached_data()
+        else:
+            check_market_close_auto_update_async()
+
+    # --- UI Cấu hình ---
+    mode_radio = ft.RadioGroup(
+        content=ft.Column([
+            ft.Radio(value="local", label="Chế độ Cục bộ (Chạy quét trực tiếp trên điện thoại - Chậm, tốn 3G/4G)"),
+            ft.Radio(value="server", label="Chế độ Máy chủ (Kết nối tới Server FastAPI - Tốc độ cực nhanh, khuyên dùng)")
+        ]),
+        value="server" if is_server_mode else "local",
+        on_change=on_mode_change
+    )
+    
+    server_url_input = ft.TextField(
+        label="Địa chỉ Máy chủ VNScreener (FastAPI URL)",
+        value=server_url,
+        width=400,
+        disabled=not is_server_mode,
+        border_color=TEXT_SECONDARY,
+        focused_border_color=ACCENT_BLUE
+    )
+
+    settings_tab = ft.Column(
+        controls=[
+            ft.Container(
+                content=ft.Column([
+                    ft.Text("CẤU HÌNH HỆ THỐNG", size=18, color=ACCENT_GREEN, weight=ft.FontWeight.BOLD),
+                    ft.Divider(color="#263238"),
+                    ft.Text("Chọn chế độ vận hành phù hợp với thiết bị của bạn:", size=14, color=TEXT_PRIMARY),
+                    mode_radio,
+                    ft.Divider(color="#263238"),
+                    ft.Text("Địa chỉ Máy chủ VNScreener (FastAPI):", size=14, color=TEXT_PRIMARY),
+                    server_url_input,
+                    ft.Text("Mẹo: Đảm bảo máy tính đang chạy 'python run.py' và điện thoại kết nối chung Wi-Fi.", size=12, color=TEXT_SECONDARY),
+                    ft.Container(height=10),
+                    ft.Button(
+                        content=ft.Text("LƯU CẤU HÌNH", weight=ft.FontWeight.BOLD),
+                        bgcolor=ACCENT_GREEN,
+                        color=BG_COLOR,
+                        height=45,
+                        icon=ft.Icons.SAVE,
+                        on_click=save_settings
+                    )
+                ]),
+                bgcolor=CARD_BG,
+                padding=20,
+                border_radius=10,
+                border=ft.Border.all(1, "#263238")
+            )
+        ],
+        spacing=15
+    )
 
     # --- Tabs Views Layout ---
     
@@ -723,12 +1012,9 @@ def main(page: ft.Page):
         apply_filters()
     render_alerts_table()
     
-    # Kích hoạt bộ kiểm tra quét tự động sau đóng cửa
-    check_market_close_auto_update()
-
     # Main Tabs Control
     tabs = ft.Tabs(
-        length=3,
+        length=4,
         selected_index=0,
         animation_duration=300,
         content=ft.Column(
@@ -737,14 +1023,16 @@ def main(page: ft.Page):
                     tabs=[
                         ft.Tab(label="BỘ LỌC CỔ PHIẾU", icon=ft.Icons.FILTER_ALT),
                         ft.Tab(label="CẢNH BÁO MỚI", icon=ft.Icons.NOTIFICATIONS_ACTIVE),
-                        ft.Tab(label="TIÊU CHÍ & PHÂN LOẠI", icon=ft.Icons.MENU_BOOK)
+                        ft.Tab(label="TIÊU CHÍ & PHÂN LOẠI", icon=ft.Icons.MENU_BOOK),
+                        ft.Tab(label="CẤU HÌNH MÁY CHỦ", icon=ft.Icons.SETTINGS)
                     ]
                 ),
                 ft.TabBarView(
                     controls=[
                         screener_tab,
                         alerts_container,
-                        criteria_guide_tab
+                        criteria_guide_tab,
+                        settings_tab
                     ],
                     expand=True
                 )
@@ -766,6 +1054,9 @@ def main(page: ft.Page):
     )
 
     page.add(header, tabs)
+    
+    # Kích hoạt tải dữ liệu bất đồng bộ sau khi giao diện đã hiện
+    threading.Thread(target=init_data, daemon=True).start()
 
 if __name__ == "__main__":
-    ft.run(main)
+    ft.app(target=main)
